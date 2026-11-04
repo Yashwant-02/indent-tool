@@ -1,52 +1,5 @@
 """
 INDENT TOOL - single-file Streamlit app
-=======================================
-
-Phase 1  Tab "1 · Build Indent Workbook"
-    Download the input template, fill it, upload it, choose the brand, download TR_INDENT_<BRAND>.xlsx.
-    Required column names are in red in the template.
-    Sheets   WH             HSN, Section, Barcode, Article, Color, Size, MRP, Qty
-             Current Stock  Store Code, Brand, Section, Qty                      (+ Store Name, Article, Color, Size, Barcode)
-             Sale           Store Code, Brand, Section, Qty        (optional)    (+ Store Name)
-             Outward        Store Code, Section, Date, Qty         (optional)    (+ Store Name, Article, Color, Size, Barcode)
-    - Only WH and Current Stock are needed. Sheet and column names ignore case and extra spaces.
-    - WH and Outward have no Brand: WH must be of the chosen brand, and so must the Outward.
-    - Only the chosen brand is used from Sale and Current Stock. Only WH sections are used.
-    - Stores: the codes typed in the box. If the box is empty, every store of the brand in Current Stock.
-    - Outward: if a date is chosen, only rows on or after that date are used (older Outward has already
-      reached the store). Without a date, all Outward is used.
-    - Stores are ranked by sale (by stock, highest first, when there is no Sale sheet).
-      Summary rows show soh, and sale and outward when those sheets are used (sale/soh/out).
-    - Each WH row also shows, in light red text in every store column, the SOH (and Outward) the store
-      already has for the same article + color + size. It is text, so the Indent and SHORT formulas
-      ignore it. Typing a qty over it makes a normal number. Without Article/Color/Size only the
-      summary rows are shown.
-    - The first line of the instructions block shows the brand, the Outward date and the store count.
-
-Manual   Allocate quantities in the store columns of Sheet2 (column L onwards), save in Excel.
-
-Phase 2  Tab "2 · Fill Platform Templates"
-    Upload the allocated sheet, choose the indent date, download:
-      FF Xpress Store Indent  FF_XPRESS_STORE_INDENT<DDMMYYYY>.xlsx
-      PO Indent               PO_INDENT_<DD-Mon-YY>.xlsx
-      Plain Data              INDENT_DATA_<DDMMYYYY>.xlsx  (all fields, to copy into any other format)
-
-Files
-    app.py                  this file (screen + all logic)
-    requirements.txt        libraries, versions fixed so the app runs the same everywhere
-    .streamlit/config.toml  light theme and upload limit
-    templates/*.xlsx        blank platform templates (column mapping is in PLATFORMS below)
-
-Run on a PC       pip install -r requirements.txt   then   streamlit run app.py
-Streamlit Cloud   Put these files in a GitHub repo. On share.streamlit.io choose New app, pick the repo,
-                  main file app.py, Advanced settings: Python 3.11 or newer, Deploy.
-                  Uploaded files are processed in memory only; nothing is saved.
-
-Adding a platform format
-    Put the blank template in templates/ and add one entry to PLATFORMS. "columns" maps a template
-    header (case and extra spaces ignored) to a field: store_code, store_name, ean, qty, mrp, hsn,
-    section, article, color, size, indent_date, season_year - or {"const": "EA"} for a fixed value.
-    "as": "int" is optional. Headers that are not listed stay blank.
 """
 import datetime as dt
 import io
@@ -808,12 +761,15 @@ st.set_page_config(page_title="Indent Tool", layout="wide", initial_sidebar_stat
 st.markdown(
     """
     <style>
+    /* Theme-aware: no fixed text/background colours. Text inherits the active Streamlit theme,
+       panels use a neutral translucent grey, muted text uses opacity. Works in Light and Dark. */
+
     /* ---- layout: use the full window ---- */
     .block-container {max-width: 100% !important; padding: 1.1rem 2.6rem 1.2rem 2.6rem;}
     #MainMenu, footer {visibility: hidden;}
     header[data-testid="stHeader"] {background: transparent;}
 
-    /* ---- hero banner ---- */
+    /* ---- hero banner (own dark gradient + white text: fine in both themes) ---- */
     .hero {background: linear-gradient(115deg, #0B1B4D 0%, #1D4ED8 60%, #3B82F6 100%);
            border-radius: 16px; padding: 20px 28px; margin-bottom: 14px; color: #fff;
            display: flex; align-items: center; justify-content: space-between;
@@ -826,30 +782,31 @@ st.markdown(
     .arrow {opacity: .7;}
 
     /* ---- tabs ---- */
-    .stTabs [data-baseweb="tab-list"] {gap: 6px; border-bottom: 1px solid #DDE3EE;}
+    .stTabs [data-baseweb="tab-list"] {gap: 6px; border-bottom: 1px solid rgba(128,128,128,.3);}
     .stTabs [data-baseweb="tab"] {height: 48px; padding: 0 22px; font-weight: 650; font-size: 1rem;
                                   border-radius: 10px 10px 0 0;}
-    .stTabs [aria-selected="true"] {background: #fff; color: #1D4ED8;}
+    .stTabs [aria-selected="true"] {background: rgba(128,128,128,.12);}
+    .stTabs [aria-selected="true"] p {color: #3B82F6;}
 
     /* ---- panels ---- */
-    div[data-testid="stVerticalBlockBorderWrapper"] {background: #fff; border-radius: 14px;
-                                                    border-color: #E3E8F1 !important;}
-    .panel-title {font-size: 1.05rem; font-weight: 700; color: #0F172A; margin-bottom: 2px;}
-    .panel-sub {font-size: .85rem; color: #64748B; margin-bottom: 10px;}
+    div[data-testid="stVerticalBlockBorderWrapper"] {background: rgba(128,128,128,.07);
+            border-radius: 14px; border-color: rgba(128,128,128,.3) !important;}
+    .panel-title {font-size: 1.05rem; font-weight: 700; margin-bottom: 2px;}
+    .panel-sub {font-size: .85rem; opacity: .72; margin-bottom: 10px;}
     .step {display: flex; align-items: center; gap: 10px; font-weight: 650; margin: 14px 0 6px 0;
            font-size: .98rem;}
     .step .num {background: #1D4ED8; color: #fff; width: 24px; height: 24px; border-radius: 50%;
                 display: inline-flex; align-items: center; justify-content: center; font-size: .8rem;}
-    .hint {font-size: .82rem; color: #64748B; margin: 2px 0 8px 34px;}
-    .empty {border: 1.5px dashed #CBD5E1; border-radius: 12px; padding: 54px 20px; text-align: center;
-            color: #64748B; background: #FAFBFD;}
-    .empty b {color: #334155; font-size: 1.02rem;}
+    .hint {font-size: .82rem; opacity: .72; margin: 2px 0 8px 34px;}
+    .empty {border: 1.5px dashed rgba(128,128,128,.5); border-radius: 12px; padding: 54px 20px;
+            text-align: center; background: rgba(128,128,128,.06); opacity: .85;}
+    .empty b {font-size: 1.02rem;}
 
     /* ---- metrics ---- */
-    div[data-testid="stMetric"] {background: #F6F8FC; border: 1px solid #E3E8F1; border-radius: 12px;
-                                 padding: 12px 16px;}
-    div[data-testid="stMetricLabel"] p {font-size: .82rem; color: #64748B; font-weight: 600;}
-    div[data-testid="stMetricValue"] {font-size: 1.65rem; font-weight: 750; color: #0F172A;}
+    div[data-testid="stMetric"] {background: rgba(128,128,128,.10); border: 1px solid rgba(128,128,128,.3);
+                                 border-radius: 12px; padding: 12px 16px;}
+    div[data-testid="stMetricLabel"] p {font-size: .82rem; opacity: .75; font-weight: 600;}
+    div[data-testid="stMetricValue"] {font-size: 1.65rem; font-weight: 750;}
 
     /* ---- buttons: full width, rounded ---- */
     .stButton > button, .stDownloadButton > button {width: 100%; border-radius: 10px; font-weight: 650;
